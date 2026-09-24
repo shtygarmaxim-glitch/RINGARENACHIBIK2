@@ -4,11 +4,11 @@
     tg.ready();
     tg.expand && tg.expand();
     try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
-    try { tg.setHeaderColor && tg.setHeaderColor('#101113'); tg.setBackgroundColor && tg.setBackgroundColor('#101113'); } catch (e) {}
+    try { tg.setHeaderColor && tg.setHeaderColor('#0a0a0a'); tg.setBackgroundColor && tg.setBackgroundColor('#0a0a0a'); } catch (e) {}
   }
   const $ = id => document.getElementById(id);
   const arena = $('iceArena'), puck = $('icePuck'), puckImg = puck.querySelector('.puck-img'), arrow = puck.querySelector('.ice-arrow'), ripple = puck.querySelector('.puck-ripple'), zoneMap = $('iceZoneMap'), legend = $('iceLegend'), winnerEl = $('iceWinner');
-  const APPEAR = 500, SPIN = 1400, HOLD = 500, INTRO = SPIN + HOLD, FLIGHT = 7000, CLOSE = 1000, PUCK = 24, S = 100, N = FLIGHT / 1000 * 60;
+  const APPEAR = 2000, SPIN = 3400, HOLD = 700, INTRO = SPIN + HOLD, FLIGHT = 7000, CLOSE = 1000, PUCK = 24, S = 100, N = FLIGHT / 1000 * 60;
   let W = arena.clientWidth || 358, me = null, isAdmin = false, ws, skew = 0;
   let st = { status: 'waiting', players: [], online: 0 }, L = [];
   let plan = null, planFor = null, finished = false, phase = '', cam = null;
@@ -63,9 +63,7 @@
       it.insertAdjacentHTML('beforeend', `<span>${esc(p.name)}</span><b>${fmt(p.stake)} · ${(p.stake / sum * 100).toFixed(1)}%</b>`);
       legend.append(it);
     });
-    $('icePool').textContent = sum.toFixed(2) + ' TON';
-    $('icePlayerCount').textContent = st.players.length;
-    $('online').textContent = st.online || 0;
+    $('icePool').textContent = fmt(sum);
     if (finished) applyResult();
     ui();
   }
@@ -73,13 +71,13 @@
     st.players.forEach(p => p.zone && p.zone.classList.add(p.id === st.winnerId ? 'winner-zone' : 'loser'));
     const w = st.players.find(p => p.id === st.winnerId); if (!w) return;
     const pool = st.players.reduce((s, p) => s + p.stake, 0);
-    winnerEl.innerHTML = `<div><b>${esc(w.name)}</b><small>Победитель · +${fmt(pool)} TON</small></div>`;
+    winnerEl.innerHTML = `<div><b>${esc(w.name)}</b><small>Победитель · +${fmt(pool)} ⭐</small></div>`;
     winnerEl.classList.add('show');
   }
   function ui() {
     const now = Date.now() + skew; let txt = '', can = false;
     if (st.status === 'waiting') { txt = st.players.length ? 'Ждём 2-го игрока' : 'Набор игроков'; can = true; }
-    else if (st.status === 'countdown') { const left = st.endsAt - now; if (left > CLOSE) { txt = 'Старт через ' + Math.ceil(left / 1000) + ' с'; can = true; } else txt = 'Ставки закрыты'; }
+    else if (st.status === 'countdown') { const left = st.endsAt - now; if (left > CLOSE) { txt = 'Начало через 00:' + String(Math.ceil(left / 1000)).padStart(2, '0'); can = true; } else txt = 'Ставки закрыты'; }
     else if (st.status === 'running') txt = phase === 'rushing' ? 'Шайба на льду' : 'Раунд начинается';
     else txt = 'Раунд завершён';
     $('iceStatus').textContent = txt;
@@ -94,7 +92,7 @@
   function sim(x, y, ang, spd) {
     let vx = Math.cos(ang) * spd, vy = Math.sin(ang) * spd; const dt = 1 / 60, decay = 4.5 / (FLIGHT / 1000), pts = [[x, y]];
     for (let i = 1; i <= N; i++) {
-      const boost = 1 + Math.exp(-((i - 1) * dt) / .4); x += vx * dt * boost; y += vy * dt * boost;
+      const boost = 1 + 3 * Math.exp(-((i - 1) * dt) / .4); x += vx * dt * boost; y += vy * dt * boost;
       let bx = false, by = false;
       if (x < 0) { x = 0; if (vx < 0) { vx = Math.abs(vx) * .78; bx = true; } } else if (x > 100) { x = 100; if (vx > 0) { vx = -Math.abs(vx) * .78; bx = true; } }
       if (y < 0) { y = 0; if (vy < 0) { vy = Math.abs(vy) * .78; by = true; } } else if (y > 100) { y = 100; if (vy > 0) { vy = -Math.abs(vy) * .78; by = true; } }
@@ -131,7 +129,7 @@
   // появление шайбы: плавный рост без затемнения, расходящееся кольцо, стрелка крутится вокруг шайбы и замирает по направлению броска
   function fx(t) {
     const e = easeOut(clamp01(t / APPEAR)), s = .45 + .55 * e;
-    puckImg.style.opacity = '1';
+    puckImg.style.opacity = e.toFixed(3);
     puckImg.style.transform = `scale(${s.toFixed(3)})`;
     const r = clamp01(t / 800);
     ripple.style.opacity = (.7 * (1 - r) * (1 - r)).toFixed(3);
@@ -190,6 +188,7 @@
         layout(); render();
       }
       else if (m.t === 'users') renderUsers(m.list);
+      else if (m.t === 'history') renderHistory(m);
       else if (m.t === 'ok') toast(m.msg);
       else if (m.t === 'err') { toast(m.msg); if (m.fatal) $('iceStatus').textContent = 'Нужен Telegram'; }
     };
@@ -199,6 +198,80 @@
   // ---------- ставки ----------
   $('iceJoinBtn').addEventListener('click', () => send({ t: 'bet', amount: Number($('betAmt').value) }));
   document.querySelectorAll('.ice-stakes button').forEach(b => b.addEventListener('click', () => { $('betAmt').value = b.dataset.v; }));
+
+  // ---------- история игр ----------
+  let hData = { top: null, last: null, list: [] }, curGame = null;
+  const GEM = '<svg class="gem" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.2 3h11.6l4.2 6.2L12 21.5 2 9.2z"/><path d="M2 9.2h20M9 3l-2.2 6.2L12 21.5M15 3l2.2 6.2L12 21.5" fill="none" stroke="#0b0b0b" stroke-opacity=".35" stroke-width="1"/></svg>';
+  const gp = g => ({ name: g.name || '?', photo: g.photo, color: g.color || '#ffc61a' });
+  function fillCard(el, g) {
+    if (!g) { el.innerHTML = '<span class="hd-empty">Пока нет игр</span>'; return; }
+    el.innerHTML = ''; el.append(avatar(gp(g), 'lg-av', 22));
+    el.insertAdjacentHTML('beforeend', `<span class="hd-name">${esc(g.name)}</span><b class="hd-win">+${fmt(g.pool)}${GEM}</b>`);
+  }
+  function renderHistory(h) {
+    hData = h;
+    fillCard($('topGame'), h.top); fillCard($('lastGame'), h.last);
+    const list = $('histList'); list.innerHTML = '';
+    if (!h.list.length) { list.innerHTML = '<p class="ice-hint">Игр пока не было</p>'; return; }
+    h.list.forEach(g => {
+      const row = document.createElement('div'); row.className = 'hist-row'; row.append(avatar(gp(g), 'lg-av', 30));
+      const when = new Date(g.ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      row.insertAdjacentHTML('beforeend', `<span style="flex:1;min-width:0"><span class="hd-name">${esc(g.name)}</span><small>${g.players.length} игр. · ${when}</small></span><b class="hd-win">+${fmt(g.pool)}${GEM}</b>`);
+      row.addEventListener('click', () => openGame(g));
+      list.append(row);
+    });
+  }
+  $('topGame').addEventListener('click', () => hData.top && openGame(hData.top));
+  $('lastGame').addEventListener('click', () => hData.last && openGame(hData.last));
+
+  // ---------- детали игры + legit check ----------
+  const shortHex = s => s.length > 10 ? s.slice(0, 4) + '…' + s.slice(-4) : s;
+  function openGame(g) {
+    curGame = g;
+    $('gmId').textContent = g.id;
+    const d = new Date(g.ts);
+    $('gmDate').textContent = d.toLocaleDateString('ru-RU') + ' · ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    $('gmHash').textContent = shortHex(g.hash);
+    $('gmSeed').textContent = shortHex(String(g.seed));
+    const pool = g.players.reduce((s, p) => s + p.stake, 0);
+    const ordered = [...g.players].sort((a, b) => b.stake - a.stake);
+    $('gmPlayers').innerHTML = '';
+    ordered.forEach(p => {
+      const isWin = p.id === g.winnerId;
+      const row = document.createElement('div'); row.className = 'gm-p' + (isWin ? ' win' : '');
+      row.append(avatar(p, 'lg-av', 32));
+      row.insertAdjacentHTML('beforeend', `<span class="gm-p-name"><b>${esc(p.name)}${isWin ? '<span class="gm-win-badge">Победитель</span>' : ''}</b><small>${(p.stake / pool * 100).toFixed(2)}%</small></span><b class="gm-p-amt">${isWin ? '+' : ''}${fmt(isWin ? pool : p.stake)}${GEM}</b>`);
+      $('gmPlayers').append(row);
+    });
+    $('gmVerdict').textContent = ''; $('gmVerdict').className = 'gm-verdict';
+    $('gameModal').classList.add('show');
+  }
+  $('gmClose').addEventListener('click', () => $('gameModal').classList.remove('show'));
+  $('gameModal').addEventListener('click', e => { if (e.target === $('gameModal')) $('gameModal').classList.remove('show'); });
+  document.querySelectorAll('.gm-copy').forEach(b => b.addEventListener('click', () => {
+    if (!curGame) return;
+    const v = b.dataset.t === 'hash' ? curGame.hash : String(curGame.seed);
+    (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => toast('Скопировано')).catch(() => toast('Не удалось скопировать'));
+  }));
+  $('gmCheckBtn').addEventListener('click', async () => {
+    if (!curGame) return;
+    const v = $('gmVerdict');
+    v.textContent = 'Проверяем…'; v.className = 'gm-verdict';
+    try {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(curGame.seed)));
+      const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+      const hashOk = hex === curGame.hash;
+      const pool = curGame.players.reduce((s, p) => s + p.stake, 0);
+      let x = rng(curGame.seed)() * pool, w = curGame.players[0];
+      for (const p of curGame.players) { if (x < p.stake) { w = p; break; } x -= p.stake; }
+      const pickOk = w.id === curGame.winnerId;
+      if (hashOk && pickOk) { v.textContent = '✅ Проверено — сид совпадает с хешем, победитель посчитан честно'; v.className = 'gm-verdict ok'; }
+      else { v.textContent = '❌ Проверка не пройдена'; v.className = 'gm-verdict bad'; }
+    } catch (e) { v.textContent = 'Не удалось проверить в этом браузере'; v.className = 'gm-verdict bad'; }
+  });
+  $('histBtn').addEventListener('click', () => $('histModal').classList.add('show'));
+  $('histClose').addEventListener('click', () => $('histModal').classList.remove('show'));
+  $('histModal').addEventListener('click', e => { if (e.target === $('histModal')) $('histModal').classList.remove('show'); });
 
   // ---------- админка ----------
   function renderUsers(list) {
