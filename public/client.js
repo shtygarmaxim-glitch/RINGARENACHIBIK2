@@ -125,15 +125,19 @@
     return pts;
   }
   // Победитель определён сервером; подбираем траекторию (по общему seed), которая приводит шайбу в его зону.
-  // Аномалия "slide": скорость шайбы ×4, полёт длится на 5с дольше (совпадает с серверным RUN_MS + extra).
+  // Аномалия "stop": та же физика, но полёт обрезается в случайный момент (2с..полная длина) —
+  // шайба должна оказаться в зоне победителя уже на этот укороченный момент, а не на полном времени полёта.
   function buildPlan() {
-    const mult = st.anomaly === 'slide' ? 4 : 1;
-    const flightMs = BASE_FLIGHT + (st.anomaly === 'slide' ? 5000 : 0);
+    let flightMs = BASE_FLIGHT;
+    if (st.anomaly === 'stop') {
+      const rs = rng((st.seed ^ 0x9e3779b9) >>> 0); // отдельный поток случайности от общего seed раунда
+      flightMs = Math.round(2000 + rs() * (BASE_FLIGHT - 2000));
+    }
     const n = Math.round(flightMs / 1000 * 60);
     let best = null;
     for (let k = 0; k < 4000; k++) {
       const r = rng((st.seed + k * 7919) >>> 0);
-      const sx = 12 + r() * 76, sy = 14 + r() * 72, q = Math.floor(r() * 4), ang = (q * 90 + 24 + r() * 42) * Math.PI / 180, spd = (750 + r() * 160) * mult, sa = r() * 360;
+      const sx = 12 + r() * 76, sy = 14 + r() * 72, q = Math.floor(r() * 4), ang = (q * 90 + 24 + r() * 42) * Math.PI / 180, spd = 750 + r() * 160, sa = r() * 360;
       const pts = sim(sx, sy, ang, spd, flightMs, n); best = { sp: [sx, sy], pts, ang, sa, flightMs, n };
       const e = pts[n]; if (getWinner(e[0], e[1]).id === st.winnerId) break;
     }
@@ -177,7 +181,11 @@
       const tx = Math.max(-lim, Math.min(lim, (50 - cam.x) * sc)), ty = Math.max(-lim, Math.min(lim, (50 - cam.y) * sc));
       arena.style.transform = `translate(${tx}%,${ty}%) scale(${sc})`;
     }
-    if (ft >= plan.flightMs && !finished) { finished = true; applyResult(); }
+    if (ft >= plan.flightMs && !finished) {
+      finished = true; applyResult();
+      const track = zoneMap.querySelector('.race-track'); // "Гонка": как только победитель определился, панель с игроками останавливается
+      if (track) track.style.animationPlayState = 'paused';
+    }
   }
   function loop() {
     requestAnimationFrame(loop);
@@ -221,18 +229,21 @@
   // Сервер отдаёт st.anomaly = null, пока раунд не перешёл в running (ставки уже закрыты),
   // так что до этого момента бейдж вообще не появляется и не спойлерит исход.
   // Как только раунд стартует, бейдж выскакивает в углу арены и "крутит" иконки между
-  // 🏁/⚡ примерно 0.7с, затем останавливается на реальной аномалии этого раунда.
-  const ANOMALY_NAMES = { slide: 'Скольжение ⚡', race: 'Гонка 🏁' };
-  const ANOMALY_TAG = { slide: '⚡', race: '🏁' };
-  const ANOMALY_CYCLE = ['🏁', '⚡'];
+  // вариантами анoмалий примерно 0.7с, затем останавливается на реальной аномалии этого раунда.
+  const ANOMALY_NAMES = { race: 'Гонка 🏁', stop: 'Стоп 🛑', storm: 'Шторм ⚡' };
+  const ANOMALY_TAG = { race: '🏁', stop: '🛑', storm: '⚡' };
+  const ANOMALY_CYCLE = ['🏁', '🛑', '⚡'];
   let shownAnomalyFor = null, anomalySpin = null, anomalyRollT = null;
   function updateAnomalyUI() {
     const badge = $('anomalyBadge'), icon = badge.querySelector('.ab-icon');
     if (st.status === 'waiting' || st.status === 'countdown') {
       shownAnomalyFor = null; clearInterval(anomalySpin); clearTimeout(anomalyRollT);
       badge.classList.remove('show', 'rolling', 'settled');
+      $('iceArenaShell').classList.remove('storm-active'); zoneMap.classList.remove('storm-active');
       return;
     }
+    $('iceArenaShell').classList.toggle('storm-active', st.anomaly === 'storm' && st.status === 'running');
+    zoneMap.classList.toggle('storm-active', st.anomaly === 'storm' && st.status === 'running');
     if (shownAnomalyFor !== st.id) {
       shownAnomalyFor = st.id;
       clearInterval(anomalySpin); clearTimeout(anomalyRollT);
