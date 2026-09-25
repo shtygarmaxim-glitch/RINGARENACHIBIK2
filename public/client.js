@@ -46,17 +46,34 @@
   function getWinner(x, y) { let best = L[0], bv = Infinity; for (const p of L) { const v = (x - p.sx) ** 2 + (y - p.sy) ** 2 - p.w; if (v < bv) { bv = v; best = p; } } return best; }
 
   // ---------- отрисовка ----------
-  function render() {
-    zoneMap.innerHTML = ''; legend.innerHTML = '';
-    const sum = L.reduce((s, p) => s + p.stake, 0), cs = L.length ? cells() : [];
+  // Строит мозаику зон один раз; для аномалии "race" вставляем её ДВУМЯ одинаковыми копиями
+  // друг под другом и бесконечно сдвигаем весь блок ровно на одну свою высоту — при таком
+  // сдвиге кадр в конце цикла пиксель-в-пиксель совпадает с начальным, поэтому шов незаметен
+  // (раньше двигалась только заливка внутри одной копии — на границе цикла было видно скачок).
+  function buildMosaic() {
+    const frag = document.createDocumentFragment(), cs = L.length ? cells() : [], zones = [];
     st.players.map((p, i) => i).sort((a, b) => (st.players[a].id === (me && me.id) ? 1 : 0) - (st.players[b].id === (me && me.id) ? 1 : 0)).forEach(i => {
       const p = st.players[i], poly = cs[i], inf = info(poly), r = inr(poly, inf.cx, inf.cy);
       const el = document.createElement('div'); el.className = 'zone-item' + (me && p.id === me.id ? ' mine' : '');
       el.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="${poly.map(v => v[0].toFixed(2) + ',' + v[1].toFixed(2)).join(' ')}" fill="${p.color}"/></svg>`;
       const d = Math.min(46, r * W / 100 * 1.4);
       if (d >= 14) { const a = avatar(p, 'zone-av', Math.round(d)); a.style.left = inf.cx + '%'; a.style.top = inf.cy + '%'; el.append(a); }
-      zoneMap.append(el); p.zone = el;
+      frag.append(el); zones.push({ p, el });
     });
+    return { frag, zones };
+  }
+  function render() {
+    zoneMap.innerHTML = ''; legend.innerHTML = '';
+    const sum = L.reduce((s, p) => s + p.stake, 0);
+    const racing = st.anomaly === 'race' && st.status === 'running';
+    const { frag, zones } = buildMosaic();
+    zones.forEach(({ p, el }) => { p.zone = el; });
+    if (racing) {
+      const track = document.createElement('div'); track.className = 'race-track';
+      const f1 = document.createElement('div'); f1.className = 'race-frame'; f1.append(frag);
+      const f2 = document.createElement('div'); f2.className = 'race-frame'; f2.innerHTML = f1.innerHTML;
+      track.append(f1, f2); zoneMap.append(track);
+    } else zoneMap.append(frag);
     st.players.forEach(p => {
       const it = document.createElement('div'); it.className = 'ice-player';
       it.append(avatar(p, 'lg-av', 20));
@@ -201,19 +218,39 @@
   connect();
 
   // ---------- аномалии ----------
+  // Сервер отдаёт st.anomaly = null, пока раунд не перешёл в running (ставки уже закрыты),
+  // так что до этого момента бейдж вообще не появляется и не спойлерит исход.
+  // Как только раунд стартует, бейдж выскакивает в углу арены и "крутит" иконки между
+  // 🏁/⚡ примерно 0.7с, затем останавливается на реальной аномалии этого раунда.
   const ANOMALY_NAMES = { slide: 'Скольжение ⚡', race: 'Гонка 🏁' };
   const ANOMALY_TAG = { slide: '⚡', race: '🏁' };
-  let shownAnomalyFor = null;
+  const ANOMALY_CYCLE = ['🏁', '⚡'];
+  let shownAnomalyFor = null, anomalySpin = null, anomalyRollT = null;
   function updateAnomalyUI() {
-    const banner = $('anomalyBanner');
-    if (st.anomaly && ANOMALY_NAMES[st.anomaly]) {
-      banner.querySelector('b').textContent = ANOMALY_NAMES[st.anomaly];
-      banner.classList.add('show');
-      if (shownAnomalyFor !== st.id) { shownAnomalyFor = st.id; toast('Аномалия! ' + ANOMALY_NAMES[st.anomaly]); }
-    } else {
-      banner.classList.remove('show');
+    const badge = $('anomalyBadge'), icon = badge.querySelector('.ab-icon');
+    if (st.status === 'waiting' || st.status === 'countdown') {
+      shownAnomalyFor = null; clearInterval(anomalySpin); clearTimeout(anomalyRollT);
+      badge.classList.remove('show', 'rolling', 'settled');
+      return;
     }
-    zoneMap.classList.toggle('race-active', st.anomaly === 'race' && st.status === 'running');
+    if (shownAnomalyFor !== st.id) {
+      shownAnomalyFor = st.id;
+      clearInterval(anomalySpin); clearTimeout(anomalyRollT);
+      badge.classList.remove('settled');
+      if (st.anomaly && ANOMALY_TAG[st.anomaly]) {
+        badge.classList.add('show', 'rolling');
+        let i = 0; icon.textContent = ANOMALY_CYCLE[0];
+        anomalySpin = setInterval(() => { icon.textContent = ANOMALY_CYCLE[++i % ANOMALY_CYCLE.length]; }, 110);
+        anomalyRollT = setTimeout(() => {
+          clearInterval(anomalySpin);
+          icon.textContent = ANOMALY_TAG[st.anomaly];
+          badge.classList.remove('rolling'); badge.classList.add('settled');
+          toast('Аномалия! ' + ANOMALY_NAMES[st.anomaly]);
+        }, 700);
+      } else {
+        badge.classList.remove('show', 'rolling');
+      }
+    }
   }
 
   // ---------- ставки ----------
