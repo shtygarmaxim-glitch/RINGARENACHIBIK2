@@ -85,13 +85,19 @@ function rng(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = M
 const sha256 = s => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 // ---------- раунд ----------
-// Аномалии: "slide" — шайба летит в 4× быстрее, раунд длится на 5с дольше; "race" — зоны едут вверх конвейером,
-// на исход не влияет (чисто визуально). Обычный шанс на раунд — 20% суммарно (10%/10%). Админ может форсировать
+// Аномалии (все чисто визуальные — на выбор победителя и выплаты не влияют, он всегда решается pickWinner()):
+// "race" — зоны едут вверх конвейером; "stop" — шайба летит как обычно, но в случайный момент (2с..конец полёта)
+// резко замирает прямо в зоне уже определённого победителя; "storm" — арену потряхивает, зоны мерцают.
+// Суммарный шанс аномалии на раунд — 20%, распределён по весам ниже. Админ может форсировать
 // конкретную аномалию на следующий раунд — тогда рандом не кидается.
-const ANOMALY_KEYS = ['slide', 'race'];
-const ANOMALY_CHANCE = 0.2;
-const ANOMALY_NAMES = { slide: 'Скольжение', race: 'Гонка' };
-function rollAnomaly() { return Math.random() < ANOMALY_CHANCE ? ANOMALY_KEYS[Math.floor(Math.random() * ANOMALY_KEYS.length)] : null; }
+const ANOMALY_WEIGHTS = { race: 0.08, stop: 0.06, storm: 0.06 };
+const ANOMALY_KEYS = Object.keys(ANOMALY_WEIGHTS);
+const ANOMALY_NAMES = { race: 'Гонка', stop: 'Стоп', storm: 'Шторм' };
+function rollAnomaly() {
+  const r = Math.random(); let acc = 0;
+  for (const k of ANOMALY_KEYS) { acc += ANOMALY_WEIGHTS[k]; if (r < acc) return k; }
+  return null;
+}
 let pendingAnomaly = null; // форс от админа на СЛЕДУЮЩИЙ вызов newRound()
 let round, timer;
 function newRound() {
@@ -149,8 +155,7 @@ function startRun() {
   round.winnerId = w.id;
   round.startAt = Date.now() + 500;
   broadcast();
-  const extra = round.anomaly === 'slide' ? 5000 : 0; // должно совпадать с продлением полёта у клиента (buildPlan)
-  timer = setTimeout(finish, RUN_MS + extra);
+  timer = setTimeout(finish, RUN_MS);
 }
 
 function finish() {
