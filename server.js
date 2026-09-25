@@ -6,6 +6,8 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const APP_URL = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || '';
 const ADMIN_ID = String(process.env.ADMIN_ID || '618124780');
 const DATA_FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
+// Шайба у клиента визуально останавливается через 500 (задержка старта) + 4100 (появление/прицел) + 7000 (полёт) = 11600мс
+// после броадкаста 'running'. Начисляем баланс и обновляем историю ещё через ~2с после этого, чтобы не обгонять анимацию.
 const COUNTDOWN = 10000, CLOSE = 1000, RUN_MS = 13600, RESULT_MS = 4500;
 const COLORS = ['#ffc61a', '#ff8a1f', '#f4c430', '#e8720c', '#ffe066', '#d4a017', '#ff7f11', '#ffb347'];
 const r3 = x => Math.round(x * 1000) / 1000;
@@ -83,10 +85,20 @@ function rng(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = M
 const sha256 = s => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 // ---------- раунд ----------
+// Аномалии: "slide" — шайба летит в 4× быстрее, раунд длится на 5с дольше; "race" — зоны едут вверх конвейером,
+// на исход не влияет (чисто визуально). Обычный шанс на раунд — 20% суммарно (10%/10%). Админ может форсировать
+// конкретную аномалию на следующий раунд — тогда рандом не кидается.
+const ANOMALY_KEYS = ['slide', 'race'];
+const ANOMALY_CHANCE = 0.2;
+const ANOMALY_NAMES = { slide: 'Скольжение', race: 'Гонка' };
+function rollAnomaly() { return Math.random() < ANOMALY_CHANCE ? ANOMALY_KEYS[Math.floor(Math.random() * ANOMALY_KEYS.length)] : null; }
+let pendingAnomaly = null; // форс от админа на СЛЕДУЮЩИЙ вызов newRound()
 let round, timer;
 function newRound() {
   const seed = crypto.randomInt(0, 2 ** 31);
-  return { id: roundSeq++, status: 'waiting', players: [], endsAt: 0, startAt: 0, seed, hash: sha256(seed), winnerId: null };
+  const anomaly = pendingAnomaly || rollAnomaly();
+  pendingAnomaly = null;
+  return { id: roundSeq++, status: 'waiting', players: [], endsAt: 0, startAt: 0, seed, hash: sha256(seed), winnerId: null, anomaly };
 }
 round = newRound();
 
@@ -137,7 +149,8 @@ function startRun() {
   round.winnerId = w.id;
   round.startAt = Date.now() + 500;
   broadcast();
-  timer = setTimeout(finish, RUN_MS);
+  const extra = round.anomaly === 'slide' ? 5000 : 0; // должно совпадать с продлением полёта у клиента (buildPlan)
+  timer = setTimeout(finish, RUN_MS + extra);
 }
 
 function finish() {
@@ -147,7 +160,7 @@ function finish() {
   const wp = round.players.find(p => p.id === round.winnerId) || {};
   history.unshift({
     id: round.id, ts: Date.now(), pool, winnerId: round.winnerId, name: wp.name || '', photo: wp.photo || '', color: wp.color || '#ffc61a',
-    seed: round.seed, hash: round.hash,
+    seed: round.seed, hash: round.hash, anomaly: round.anomaly || null,
     players: round.players.map(p => ({ id: p.id, name: p.name, photo: p.photo, color: p.color, stake: p.stake }))
   });
   if (history.length > 200) history.length = 200;
@@ -170,7 +183,7 @@ const send = (ws, m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); }
 function stateMsg() {
   const revealed = round.status === 'running' || round.status === 'result';
   return { t: 'state', now: Date.now(), online: clients.size, id: round.id, status: round.status, endsAt: round.endsAt,
-    startAt: round.startAt, hash: round.hash, seed: revealed ? round.seed : null, winnerId: round.winnerId,
+    startAt: round.startAt, hash: round.hash, seed: revealed ? round.seed : null, winnerId: round.winnerId, anomaly: round.anomaly || null,
     players: round.players.map(p => ({ id: p.id, name: p.name, photo: p.photo, stake: p.stake, color: p.color, sx: p.sx, sy: p.sy })) };
 }
 function broadcastHistory() { const m = histMsg(); for (const ws of clients.keys()) send(ws, m); }
@@ -205,6 +218,13 @@ wss.on('connection', ws => {
       save(); sendMe(target.id);
       send(ws, { t: 'ok', msg: `${target.name}: баланс ${target.balance} ⭐` });
       send(ws, { t: 'users', list: userList() });
+    }
+    else if (id === ADMIN_ID && m.t === 'admin_force_anomaly') {
+      const key = ANOMALY_KEYS.includes(m.anomaly) ? m.anomaly : null;
+      if (round.status === 'waiting' || round.status === 'countdown') { round.anomaly = key; broadcast(); }
+      else pendingAnomaly = key;
+      const when = (round.status === 'waiting' || round.status === 'countdown') ? 'в этом раунде' : 'в следующем раунде';
+      send(ws, { t: 'ok', msg: key ? `Аномалия «${ANOMALY_NAMES[key]}» будет ${when}` : 'Форс аномалии снят' });
     }
   });
   ws.on('close', () => { clients.delete(ws); broadcast(); });
