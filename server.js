@@ -182,8 +182,10 @@ const clients = new Map(); // ws -> userId
 const send = (ws, m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
 function stateMsg() {
   const revealed = round.status === 'running' || round.status === 'result';
+  // anomaly скрыт от клиента, пока раунд не перешёл в running (т.е. пока приём ставок не закрыт) —
+  // иначе он был бы виден заранее и спойлерил бы, какая аномалия сейчас выпадет.
   return { t: 'state', now: Date.now(), online: clients.size, id: round.id, status: round.status, endsAt: round.endsAt,
-    startAt: round.startAt, hash: round.hash, seed: revealed ? round.seed : null, winnerId: round.winnerId, anomaly: round.anomaly || null,
+    startAt: round.startAt, hash: round.hash, seed: revealed ? round.seed : null, winnerId: round.winnerId, anomaly: revealed ? (round.anomaly || null) : null,
     players: round.players.map(p => ({ id: p.id, name: p.name, photo: p.photo, stake: p.stake, color: p.color, sx: p.sx, sy: p.sy })) };
 }
 function broadcastHistory() { const m = histMsg(); for (const ws of clients.keys()) send(ws, m); }
