@@ -8,7 +8,7 @@
   }
   const $ = id => document.getElementById(id);
   const arena = $('iceArena'), puck = $('icePuck'), puckImg = puck.querySelector('.puck-img'), arrow = puck.querySelector('.ice-arrow'), ripple = puck.querySelector('.puck-ripple'), zoneMap = $('iceZoneMap'), legend = $('iceLegend'), winnerEl = $('iceWinner');
-  const APPEAR = 2000, SPIN = 3400, HOLD = 700, INTRO = SPIN + HOLD, FLIGHT = 7000, CLOSE = 1000, PUCK = 24, S = 100, N = FLIGHT / 1000 * 60;
+  const APPEAR = 2000, SPIN = 3400, HOLD = 700, INTRO = SPIN + HOLD, BASE_FLIGHT = 7000, CLOSE = 1000, PUCK = 24, S = 100;
   let W = arena.clientWidth || 358, me = null, isAdmin = false, ws, skew = 0;
   let st = { status: 'waiting', players: [], online: 0 }, L = [];
   let plan = null, planFor = null, finished = false, phase = '', cam = null;
@@ -89,9 +89,9 @@
 
   // ---------- детерминированная физика шайбы ----------
   function rng(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-  function sim(x, y, ang, spd) {
-    let vx = Math.cos(ang) * spd, vy = Math.sin(ang) * spd; const dt = 1 / 60, decay = 4.5 / (FLIGHT / 1000), pts = [[x, y]];
-    for (let i = 1; i <= N; i++) {
+  function sim(x, y, ang, spd, flightMs, n) {
+    let vx = Math.cos(ang) * spd, vy = Math.sin(ang) * spd; const dt = 1 / 60, decay = 4.5 / (flightMs / 1000), pts = [[x, y]];
+    for (let i = 1; i <= n; i++) {
       const boost = 1 + 3 * Math.exp(-((i - 1) * dt) / .4); x += vx * dt * boost; y += vy * dt * boost;
       let bx = false, by = false;
       if (x < 0) { x = 0; if (vx < 0) { vx = Math.abs(vx) * .78; bx = true; } } else if (x > 100) { x = 100; if (vx > 0) { vx = -Math.abs(vx) * .78; bx = true; } }
@@ -108,13 +108,17 @@
     return pts;
   }
   // Победитель определён сервером; подбираем траекторию (по общему seed), которая приводит шайбу в его зону.
+  // Аномалия "slide": скорость шайбы ×4, полёт длится на 5с дольше (совпадает с серверным RUN_MS + extra).
   function buildPlan() {
+    const mult = st.anomaly === 'slide' ? 4 : 1;
+    const flightMs = BASE_FLIGHT + (st.anomaly === 'slide' ? 5000 : 0);
+    const n = Math.round(flightMs / 1000 * 60);
     let best = null;
     for (let k = 0; k < 4000; k++) {
       const r = rng((st.seed + k * 7919) >>> 0);
-      const sx = 12 + r() * 76, sy = 14 + r() * 72, q = Math.floor(r() * 4), ang = (q * 90 + 24 + r() * 42) * Math.PI / 180, spd = 750 + r() * 160, sa = r() * 360;
-      const pts = sim(sx, sy, ang, spd); best = { sp: [sx, sy], pts, ang, sa };
-      const e = pts[N]; if (getWinner(e[0], e[1]).id === st.winnerId) break;
+      const sx = 12 + r() * 76, sy = 14 + r() * 72, q = Math.floor(r() * 4), ang = (q * 90 + 24 + r() * 42) * Math.PI / 180, spd = (750 + r() * 160) * mult, sa = r() * 360;
+      const pts = sim(sx, sy, ang, spd, flightMs, n); best = { sp: [sx, sy], pts, ang, sa, flightMs, n };
+      const e = pts[n]; if (getWinner(e[0], e[1]).id === st.winnerId) break;
     }
     const fa = best.ang * 180 / Math.PI + 90;
     best.fa = fa; best.ea = best.sa + 720 + ((((fa - best.sa) % 360) + 360) % 360); // 2 оборота и остановка ровно по направлению полёта
@@ -145,10 +149,10 @@
     fx(t);
     if (t < INTRO) { setPhase(t < SPIN ? 'choosing' : 'aiming'); place(plan.sp[0], plan.sp[1]); return; }
     setPhase('rushing');
-    const ft = Math.min(t - INTRO, FLIGHT), idx = ft / 1000 * 60, i = Math.min(N - 1, Math.floor(idx)), f = idx - i;
+    const ft = Math.min(t - INTRO, plan.flightMs), idx = ft / 1000 * 60, i = Math.min(plan.n - 1, Math.floor(idx)), f = idx - i;
     const a = plan.pts[i], b = plan.pts[i + 1], x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f;
     place(x, y);
-    const zt = Math.max(0, Math.min(1, (ft - (FLIGHT - 3000)) / 3000));
+    const zt = Math.max(0, Math.min(1, (ft - (plan.flightMs - 3000)) / 3000));
     if (zt > 0) {
       if (!cam) { cam = { x, y }; arena.style.transition = 'none'; }
       cam.x += (x - cam.x) * .12; cam.y += (y - cam.y) * .12;
@@ -156,7 +160,7 @@
       const tx = Math.max(-lim, Math.min(lim, (50 - cam.x) * sc)), ty = Math.max(-lim, Math.min(lim, (50 - cam.y) * sc));
       arena.style.transform = `translate(${tx}%,${ty}%) scale(${sc})`;
     }
-    if (ft >= FLIGHT && !finished) { finished = true; applyResult(); }
+    if (ft >= plan.flightMs && !finished) { finished = true; applyResult(); }
   }
   function loop() {
     requestAnimationFrame(loop);
@@ -185,6 +189,7 @@
       else if (m.t === 'state') {
         skew = m.now - Date.now(); st = m;
         if (st.status === 'waiting' || st.status === 'countdown') resetVisual();
+        updateAnomalyUI();
         layout(); render();
       }
       else if (m.t === 'users') renderUsers(m.list);
@@ -194,6 +199,22 @@
     };
   }
   connect();
+
+  // ---------- аномалии ----------
+  const ANOMALY_NAMES = { slide: 'Скольжение ⚡', race: 'Гонка 🏁' };
+  const ANOMALY_TAG = { slide: '⚡', race: '🏁' };
+  let shownAnomalyFor = null;
+  function updateAnomalyUI() {
+    const banner = $('anomalyBanner');
+    if (st.anomaly && ANOMALY_NAMES[st.anomaly]) {
+      banner.querySelector('b').textContent = ANOMALY_NAMES[st.anomaly];
+      banner.classList.add('show');
+      if (shownAnomalyFor !== st.id) { shownAnomalyFor = st.id; toast('Аномалия! ' + ANOMALY_NAMES[st.anomaly]); }
+    } else {
+      banner.classList.remove('show');
+    }
+    zoneMap.classList.toggle('race-active', st.anomaly === 'race' && st.status === 'running');
+  }
 
   // ---------- ставки ----------
   $('iceJoinBtn').addEventListener('click', () => send({ t: 'bet', amount: Math.round(Number($('betAmt').value)) }));
@@ -213,7 +234,8 @@
   function fillCard(el, g) {
     if (!g) { el.innerHTML = '<span class="hd-empty">Пока нет игр</span>'; return; }
     el.innerHTML = ''; el.append(avatar(gp(g), 'lg-av', 22));
-    el.insertAdjacentHTML('beforeend', `<span class="hd-name">${esc(g.name)}</span><b class="hd-win">+${fmt(g.pool)}${GEM}</b>`);
+    const tag = g.anomaly && ANOMALY_TAG[g.anomaly] ? ` <span class="hd-anomaly">${ANOMALY_TAG[g.anomaly]}</span>` : '';
+    el.insertAdjacentHTML('beforeend', `<span class="hd-name">${esc(g.name)}${tag}</span><b class="hd-win">+${fmt(g.pool)}${GEM}</b>`);
   }
   function renderHistory(h) {
     hData = h;
@@ -223,7 +245,8 @@
     h.list.forEach(g => {
       const row = document.createElement('div'); row.className = 'hist-row'; row.append(avatar(gp(g), 'lg-av', 30));
       const when = new Date(g.ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-      row.insertAdjacentHTML('beforeend', `<span style="flex:1;min-width:0"><span class="hd-name">${esc(g.name)}</span><small>${g.players.length} игр. · ${when}</small></span><b class="hd-win">+${fmt(g.pool)}${GEM}</b>`);
+      const tag = g.anomaly && ANOMALY_TAG[g.anomaly] ? ` <span class="hd-anomaly">${ANOMALY_TAG[g.anomaly]}</span>` : '';
+      row.insertAdjacentHTML('beforeend', `<span style="flex:1;min-width:0"><span class="hd-name">${esc(g.name)}${tag}</span><small>${g.players.length} игр. · ${when}</small></span><b class="hd-win">+${fmt(g.pool)}${GEM}</b>`);
       row.addEventListener('click', () => openGame(g));
       list.append(row);
     });
@@ -237,7 +260,7 @@
     curGame = g;
     $('gmId').textContent = g.id;
     const d = new Date(g.ts);
-    $('gmDate').textContent = d.toLocaleDateString('ru-RU') + ' · ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    $('gmDate').textContent = d.toLocaleDateString('ru-RU') + ' · ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + (g.anomaly && ANOMALY_NAMES[g.anomaly] ? ' · ' + ANOMALY_NAMES[g.anomaly] : '');
     $('gmHash').textContent = shortHex(g.hash);
     $('gmSeed').textContent = shortHex(String(g.seed));
     const pool = g.players.reduce((s, p) => s + p.stake, 0);
@@ -295,4 +318,5 @@
   $('adminClose').addEventListener('click', () => $('adminModal').classList.remove('show'));
   $('adminModal').addEventListener('click', e => { if (e.target === $('adminModal')) $('adminModal').classList.remove('show'); });
   $('admGive').addEventListener('click', () => send({ t: 'admin_give', userId: $('admId').value, amount: Number($('admAmt').value) }));
+  document.querySelectorAll('.adm-anomaly button').forEach(b => b.addEventListener('click', () => send({ t: 'admin_force_anomaly', anomaly: b.dataset.an })));
 })();
