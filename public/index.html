@@ -119,6 +119,16 @@ html,body{background:#0a0a0a;font-family:var(--ff-b)}
 .gm-verdict{margin-top:10px;text-align:center;font-size:12px;font-weight:700;min-height:16px}
 .gm-verdict.ok{color:#5fe0a0}.gm-verdict.bad{color:#ff6b6b}
 .hd-card,.hist-row{cursor:pointer}
+/* ===== Аномалии ===== */
+.anomaly-banner{display:none;text-align:center;padding:10px 14px;border-radius:16px;margin:0 0 10px;background:linear-gradient(135deg,rgba(138,77,255,.22),rgba(47,107,255,.14));border:1px solid rgba(168,120,255,.4);box-shadow:0 0 18px rgba(138,77,255,.18)}
+.anomaly-banner.show{display:block}
+.anomaly-banner small{display:block;color:#c9b6ff;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase}
+.anomaly-banner b{display:block;margin-top:3px;font-family:var(--ff-d);font-size:15px;color:#fff}
+.adm-anomaly{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin:8px 0 4px}
+.adm-anomaly button{padding:9px 4px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.06);color:#c9c5b8;font:700 11px var(--ff-b);cursor:pointer}
+/* аномалия "Гонка": зоны едут вверх конвейером, пока шайба катится */
+.ice-zone-map.race-active .zone-item svg{animation:race-scroll .5s linear infinite}
+@keyframes race-scroll{from{transform:translateY(0)}to{transform:translateY(-12%)}}
 </style></head><body><div class="ice-screen active" id="iceScreen">
   <div class="ice-topbar">
     <div class="hd-btns"><button class="hd-btn" id="histBtn" aria-label="История игр"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h1V3a1 1 0 0 1 1-1zm13 8H4v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9z"/></svg></button></div>
@@ -129,6 +139,7 @@ html,body{background:#0a0a0a;font-family:var(--ff-b)}
       <div class="hd-card"><small>Топ игра</small><div class="hd-row" id="topGame"><span class="hd-empty">Пока нет игр</span></div></div>
       <div class="hd-card"><small>Последняя игра</small><div class="hd-row" id="lastGame"><span class="hd-empty">Пока нет игр</span></div></div>
     </div>
+    <div id="anomalyBanner" class="anomaly-banner"><small>Аномалия активна</small><b></b></div>
     <div class="ice-game-card"><div class="ice-total"><span class="tot-l">Тотал <b id="icePool">0</b><span class="star">⭐</span></span><span class="tot-r" id="iceStatus">Подключение…</span></div>
     <div class="ice-arena-shell" id="iceArenaShell"><div class="ice-arena" id="iceArena"><div class="ice-zone-map" id="iceZoneMap"></div><div class="ice-puck" id="icePuck"><span class="puck-ripple"></span><img class="puck-img" alt="" draggable="false" src="/puck.png"><span class="ice-arrow"><svg viewBox="0 0 14 20" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 19V3M2.2 7.8 7 3l4.8 4.8"/></svg></span></div></div><div class="ice-winner" id="iceWinner"></div></div></div>
     <div class="ice-controls"><div class="ice-stake-label">Ставка, ⭐ <strong id="stakeInfo"></strong></div>
@@ -152,8 +163,10 @@ html,body{background:#0a0a0a;font-family:var(--ff-b)}
     <label class="ice-bet-field">Telegram ID игрока<input id="admId" inputmode="numeric" placeholder="нажмите на игрока в списке"></label>
     <label class="ice-bet-field">Сумма, ⭐ (минус — списать)<input id="admAmt" type="number" step="0.01" value="1" inputmode="decimal"></label>
     <button class="ice-bet-confirm" id="admGive">Выдать / списать</button>
+    <label class="ice-bet-field">Аномалии (форс на следующий раунд)</label>
+    <div class="adm-anomaly"><button data-an="slide">⚡ Скольжение</button><button data-an="race">🏁 Гонка</button><button data-an="">✖ Снять</button></div>
     <div class="adm-list" id="adminList"></div></div></div>
   <div class="toast" id="toast"></div>
 </div>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="/client.js?v=7"></script></body></html>
+<script src="/client.js?v=8"></script></body></html>
