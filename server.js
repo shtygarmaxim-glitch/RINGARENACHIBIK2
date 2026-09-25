@@ -8,7 +8,8 @@ const ADMIN_ID = String(process.env.ADMIN_ID || '618124780');
 const DATA_FILE = path.join(process.env.DATA_DIR || __dirname, 'data.json');
 // Шайба у клиента визуально останавливается через 500 (задержка старта) + 4100 (появление/прицел) + 7000 (полёт) = 11600мс
 // после броадкаста 'running'. Начисляем баланс и обновляем историю ещё через ~2с после этого, чтобы не обгонять анимацию.
-const COUNTDOWN = 10000, CLOSE = 1000, RUN_MS = 13600, RESULT_MS = 4500;
+// Аномалия "redo" на клиенте играет вдвое дольше (два пролёта с повторным прицеливанием) — для неё отдельный, больший таймер.
+const COUNTDOWN = 10000, CLOSE = 1000, RUN_MS = 13600, RUN_MS_REDO = 21000, RESULT_MS = 4500;
 const COLORS = ['#ffc61a', '#ff8a1f', '#f4c430', '#e8720c', '#ffe066', '#d4a017', '#ff7f11', '#ffb347'];
 const r3 = x => Math.round(x * 1000) / 1000;
 
@@ -86,13 +87,14 @@ const sha256 = s => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 // ---------- раунд ----------
 // Аномалии (все чисто визуальные — на выбор победителя и выплаты не влияют, он всегда решается pickWinner()):
-// "race" — зоны едут вверх конвейером; "stop" — шайба летит как обычно, но в случайный момент (2с..конец полёта)
-// резко замирает прямо в зоне уже определённого победителя; "storm" — арену потряхивает, зоны мерцают.
+// "race" — зоны едут вверх конвейером; "mirage" — весь экран "плывёт" (жидкое искажение через SVG-фильтр);
+// "redo" — шайба долетает до случайной точки и как будто замирает, победитель ещё не объявлен, затем
+// с этого же места запускается заново (повтор прицеливания) и уже второй раз останавливается в зоне победителя.
 // Суммарный шанс аномалии на раунд — 20%, распределён по весам ниже. Админ может форсировать
 // конкретную аномалию на следующий раунд — тогда рандом не кидается.
-const ANOMALY_WEIGHTS = { race: 0.08, stop: 0.06, storm: 0.06 };
+const ANOMALY_WEIGHTS = { race: 0.08, mirage: 0.06, redo: 0.06 };
 const ANOMALY_KEYS = Object.keys(ANOMALY_WEIGHTS);
-const ANOMALY_NAMES = { race: 'Гонка', stop: 'Стоп', storm: 'Шторм' };
+const ANOMALY_NAMES = { race: 'Гонка', mirage: 'Мираж', redo: 'Дубль' };
 function rollAnomaly() {
   const r = Math.random(); let acc = 0;
   for (const k of ANOMALY_KEYS) { acc += ANOMALY_WEIGHTS[k]; if (r < acc) return k; }
@@ -155,7 +157,7 @@ function startRun() {
   round.winnerId = w.id;
   round.startAt = Date.now() + 500;
   broadcast();
-  timer = setTimeout(finish, RUN_MS);
+  timer = setTimeout(finish, round.anomaly === 'redo' ? RUN_MS_REDO : RUN_MS);
 }
 
 function finish() {
