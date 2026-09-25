@@ -8,7 +8,7 @@
   }
   const $ = id => document.getElementById(id);
   const arena = $('iceArena'), puck = $('icePuck'), puckImg = puck.querySelector('.puck-img'), arrow = puck.querySelector('.ice-arrow'), ripple = puck.querySelector('.puck-ripple'), zoneMap = $('iceZoneMap'), legend = $('iceLegend'), winnerEl = $('iceWinner');
-  const APPEAR = 2000, SPIN = 3400, HOLD = 700, INTRO = SPIN + HOLD, BASE_FLIGHT = 7000, CLOSE = 1000, PUCK = 24, S = 100;
+  const APPEAR = 2000, SPIN = 3400, HOLD = 700, INTRO = SPIN + HOLD, BASE_FLIGHT = 7000, CLOSE = 1000, PUCK = 24, S = 100, STILL_HOLD = 400;
   let W = arena.clientWidth || 358, me = null, isAdmin = false, ws, skew = 0;
   let st = { status: 'waiting', players: [], online: 0 }, L = [];
   let plan = null, planFor = null, finished = false, phase = '', cam = null;
@@ -125,15 +125,9 @@
     return pts;
   }
   // Победитель определён сервером; подбираем траекторию (по общему seed), которая приводит шайбу в его зону.
-  // Аномалия "stop": та же физика, но полёт обрезается в случайный момент (2с..полная длина) —
-  // шайба должна оказаться в зоне победителя уже на этот укороченный момент, а не на полном времени полёта.
   function buildPlan() {
-    let flightMs = BASE_FLIGHT;
-    if (st.anomaly === 'stop') {
-      const rs = rng((st.seed ^ 0x9e3779b9) >>> 0); // отдельный поток случайности от общего seed раунда
-      flightMs = Math.round(2000 + rs() * (BASE_FLIGHT - 2000));
-    }
-    const n = Math.round(flightMs / 1000 * 60);
+    if (st.anomaly === 'redo') return buildRedoPlan();
+    const flightMs = BASE_FLIGHT, n = Math.round(flightMs / 1000 * 60);
     let best = null;
     for (let k = 0; k < 4000; k++) {
       const r = rng((st.seed + k * 7919) >>> 0);
@@ -145,6 +139,30 @@
     best.fa = fa; best.ea = best.sa + 720 + ((((fa - best.sa) % 360) + 360) % 360); // 2 оборота и остановка ровно по направлению полёта
     return best;
   }
+  // Аномалия "redo": первый (фальшивый) пролёт заканчивается в случайной точке — шайба тормозит,
+  // но победитель ещё не объявляется. С этого же места разыгрывается второй пролёт (со своим
+  // повторным прицеливанием), который уже по-настоящему приводит шайбу в зону победителя.
+  function buildRedoPlan() {
+    const rs = rng((st.seed ^ 0x51ed270b) >>> 0);
+    const flight1Ms = Math.round(1800 + rs() * 1000), n1 = Math.round(flight1Ms / 1000 * 60);
+    const r1 = rng((st.seed ^ 0x1a2b3c4d) >>> 0);
+    const sx1 = 12 + r1() * 76, sy1 = 14 + r1() * 72, q1 = Math.floor(r1() * 4), ang1 = (q1 * 90 + 24 + r1() * 42) * Math.PI / 180, spd1 = 750 + r1() * 160, sa1 = r1() * 360;
+    const pts1 = sim(sx1, sy1, ang1, spd1, flight1Ms, n1);
+    const fa1 = ang1 * 180 / Math.PI + 90, ea1 = sa1 + 720 + ((((fa1 - sa1) % 360) + 360) % 360);
+    const stop = pts1[n1];
+    const flight2Ms = BASE_FLIGHT, n2 = Math.round(flight2Ms / 1000 * 60);
+    let best2 = null;
+    for (let k = 0; k < 4000; k++) {
+      const r = rng((st.seed + 1 + k * 7919) >>> 0);
+      const ang = r() * Math.PI * 2, spd = 750 + r() * 160, sa = r() * 360;
+      const pts = sim(stop[0], stop[1], ang, spd, flight2Ms, n2);
+      best2 = { sp: stop, pts, ang, sa, flightMs: flight2Ms, n: n2 };
+      const e = pts[n2]; if (getWinner(e[0], e[1]).id === st.winnerId) break;
+    }
+    const fa2 = best2.ang * 180 / Math.PI + 90;
+    best2.ea = best2.sa + 720 + ((((fa2 - best2.sa) % 360) + 360) % 360);
+    return { mode: 'redo', phase1: { sp: [sx1, sy1], pts: pts1, sa: sa1, ea: ea1, flightMs: flight1Ms, n: n1 }, stop, phase2: best2 };
+  }
   function setPhase(p) {
     if (p === phase) return; phase = p;
     puck.classList.toggle('choosing', p === 'choosing'); puck.classList.toggle('aiming', p === 'aiming'); puck.classList.toggle('rushing', p === 'rushing');
@@ -152,28 +170,21 @@
   const clamp01 = x => Math.max(0, Math.min(1, x));
   const easeOut = x => 1 - Math.pow(1 - x, 3);
   // появление шайбы: плавный рост без затемнения, расходящееся кольцо, стрелка крутится вокруг шайбы и замирает по направлению броска
-  function fx(t) {
+  function fx(t, sa, ea) {
     const e = easeOut(clamp01(t / APPEAR)), s = .45 + .55 * e;
     puckImg.style.opacity = e.toFixed(3);
     puckImg.style.transform = `scale(${s.toFixed(3)})`;
     const r = clamp01(t / 800);
     ripple.style.opacity = (.7 * (1 - r) * (1 - r)).toFixed(3);
     ripple.style.transform = `translate(-50%,-50%) scale(${(.7 + 1.6 * easeOut(r)).toFixed(3)})`;
-    const ang = plan.sa + (plan.ea - plan.sa) * easeOut(clamp01(t / SPIN));
+    const ang = sa + (ea - sa) * easeOut(clamp01(t / SPIN));
     const pop = 1 + .25 * Math.sin(Math.PI * clamp01((t - SPIN) / 350));
     arrow.style.opacity = (clamp01(t / 150) * (1 - clamp01((t - INTRO) / 250))).toFixed(3);
     arrow.style.transform = `rotate(${ang.toFixed(2)}deg) scale(${(s * pop).toFixed(3)})`;
   }
-  function frame(t) {
-    if (t < 0) { puck.style.visibility = 'hidden'; place(plan.sp[0], plan.sp[1]); fx(0); return; }
-    puck.style.visibility = 'visible';
-    fx(t);
-    if (t < INTRO) { setPhase(t < SPIN ? 'choosing' : 'aiming'); place(plan.sp[0], plan.sp[1]); return; }
-    setPhase('rushing');
-    const ft = Math.min(t - INTRO, plan.flightMs), idx = ft / 1000 * 60, i = Math.min(plan.n - 1, Math.floor(idx)), f = idx - i;
-    const a = plan.pts[i], b = plan.pts[i + 1], x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f;
-    place(x, y);
-    const zt = Math.max(0, Math.min(1, (ft - (plan.flightMs - 3000)) / 3000));
+  // Общий для обычного полёта и второй фазы "redo": в последние 3с плавно наезжаем камерой на шайбу.
+  function applyCamZoom(ft, flightMs, x, y) {
+    const zt = Math.max(0, Math.min(1, (ft - (flightMs - 3000)) / 3000));
     if (zt > 0) {
       if (!cam) { cam = { x, y }; arena.style.transition = 'none'; }
       cam.x += (x - cam.x) * .12; cam.y += (y - cam.y) * .12;
@@ -181,11 +192,54 @@
       const tx = Math.max(-lim, Math.min(lim, (50 - cam.x) * sc)), ty = Math.max(-lim, Math.min(lim, (50 - cam.y) * sc));
       arena.style.transform = `translate(${tx}%,${ty}%) scale(${sc})`;
     }
+  }
+  function frame(t) {
+    if (plan.mode === 'redo') { frameRedo(t); return; }
+    if (t < 0) { puck.style.visibility = 'hidden'; place(plan.sp[0], plan.sp[1]); fx(0, plan.sa, plan.ea); return; }
+    puck.style.visibility = 'visible';
+    fx(t, plan.sa, plan.ea);
+    if (t < INTRO) { setPhase(t < SPIN ? 'choosing' : 'aiming'); place(plan.sp[0], plan.sp[1]); return; }
+    setPhase('rushing');
+    const ft = Math.min(t - INTRO, plan.flightMs), idx = ft / 1000 * 60, i = Math.min(plan.n - 1, Math.floor(idx)), f = idx - i;
+    const a = plan.pts[i], b = plan.pts[i + 1], x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f;
+    place(x, y);
+    applyCamZoom(ft, plan.flightMs, x, y);
     if (ft >= plan.flightMs && !finished) {
       finished = true; applyResult();
       const track = zoneMap.querySelector('.race-track'); // "Гонка": как только победитель определился, панель с игроками останавливается
       if (track) track.style.animationPlayState = 'paused';
     }
+  }
+  // Аномалия "redo": интро1 → пролёт1 → короткая замершая пауза (без победителя) → интро2 → пролёт2 → победитель.
+  function frameRedo(t) {
+    const p1 = plan.phase1, p2 = plan.phase2;
+    const T1 = INTRO, T2 = T1 + p1.flightMs, T3 = T2 + STILL_HOLD, T4 = T3 + INTRO;
+    if (t < 0) { puck.style.visibility = 'hidden'; place(p1.sp[0], p1.sp[1]); fx(0, p1.sa, p1.ea); return; }
+    puck.style.visibility = 'visible';
+    if (t < T1) { fx(t, p1.sa, p1.ea); setPhase(t < SPIN ? 'choosing' : 'aiming'); place(p1.sp[0], p1.sp[1]); return; }
+    if (t < T2) {
+      setPhase('rushing');
+      const ft = t - T1, idx = ft / 1000 * 60, i = Math.min(p1.n - 1, Math.floor(idx)), f = idx - i;
+      const a = p1.pts[i], b = p1.pts[i + 1];
+      place(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
+      arrow.style.opacity = 0; ripple.style.opacity = 0;
+      return;
+    }
+    if (t < T3) { // шайба замерла, победитель ещё не выбран
+      setPhase(''); place(plan.stop[0], plan.stop[1]); arrow.style.opacity = 0; ripple.style.opacity = 0;
+      return;
+    }
+    if (t < T4) {
+      const lt = t - T3;
+      fx(lt, p2.sa, p2.ea); setPhase(lt < SPIN ? 'choosing' : 'aiming'); place(p2.sp[0], p2.sp[1]);
+      return;
+    }
+    setPhase('rushing');
+    const ft = Math.min(t - T4, p2.flightMs), idx = ft / 1000 * 60, i = Math.min(p2.n - 1, Math.floor(idx)), f = idx - i;
+    const a = p2.pts[i], b = p2.pts[i + 1], x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f;
+    place(x, y);
+    applyCamZoom(ft, p2.flightMs, x, y);
+    if (ft >= p2.flightMs && !finished) finished = true, applyResult();
   }
   function loop() {
     requestAnimationFrame(loop);
@@ -230,20 +284,19 @@
   // так что до этого момента бейдж вообще не появляется и не спойлерит исход.
   // Как только раунд стартует, бейдж выскакивает в углу арены и "крутит" иконки между
   // вариантами анoмалий примерно 0.7с, затем останавливается на реальной аномалии этого раунда.
-  const ANOMALY_NAMES = { race: 'Гонка 🏁', stop: 'Стоп 🛑', storm: 'Шторм ⚡' };
-  const ANOMALY_TAG = { race: '🏁', stop: '🛑', storm: '⚡' };
-  const ANOMALY_CYCLE = ['🏁', '🛑', '⚡'];
+  const ANOMALY_NAMES = { race: 'Гонка 🏁', mirage: 'Мираж 🌊', redo: 'Дубль 🔁' };
+  const ANOMALY_TAG = { race: '🏁', mirage: '🌊', redo: '🔁' };
+  const ANOMALY_CYCLE = ['🏁', '🌊', '🔁'];
   let shownAnomalyFor = null, anomalySpin = null, anomalyRollT = null;
   function updateAnomalyUI() {
     const badge = $('anomalyBadge'), icon = badge.querySelector('.ab-icon');
     if (st.status === 'waiting' || st.status === 'countdown') {
       shownAnomalyFor = null; clearInterval(anomalySpin); clearTimeout(anomalyRollT);
       badge.classList.remove('show', 'rolling', 'settled');
-      $('iceArenaShell').classList.remove('storm-active'); zoneMap.classList.remove('storm-active');
+      $('iceScreen').classList.remove('mirage-active');
       return;
     }
-    $('iceArenaShell').classList.toggle('storm-active', st.anomaly === 'storm' && st.status === 'running');
-    zoneMap.classList.toggle('storm-active', st.anomaly === 'storm' && st.status === 'running');
+    $('iceScreen').classList.toggle('mirage-active', st.anomaly === 'mirage' && st.status === 'running');
     if (shownAnomalyFor !== st.id) {
       shownAnomalyFor = st.id;
       clearInterval(anomalySpin); clearTimeout(anomalyRollT);
