@@ -11,12 +11,15 @@ const COLORS = ['#ffc61a', '#ff8a1f', '#f4c430', '#e8720c', '#ffe066', '#d4a017'
 const r3 = x => Math.round(x * 1000) / 1000;
 
 let users = {};
+const ensureDir = f => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); } catch (e) {} };
+ensureDir(DATA_FILE);
 try { users = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) {}
 const HIST_FILE = path.join(process.env.DATA_DIR || __dirname, 'history.json');
 let history = [];
 try { history = JSON.parse(fs.readFileSync(HIST_FILE, 'utf8')); } catch (e) {}
 let roundSeq = (history[0] && history[0].id ? history[0].id : 16000) + 1;
-function saveHistory() { try { fs.writeFileSync(HIST_FILE, JSON.stringify(history)); } catch (e) { console.error(e); } }
+console.log(`История: ${history.length} игр загружено из ${HIST_FILE} (DATA_DIR=${process.env.DATA_DIR || 'не задан — файлы сбросятся при следующем деплое/рестарте'})`);
+function saveHistory() { try { fs.writeFileSync(HIST_FILE, JSON.stringify(history)); } catch (e) { console.error('saveHistory failed', e); } }
 const histMsg = () => ({ t: 'history', last: history[0] || null, top: history.reduce((b, g) => (!b || g.pool > b.pool ? g : b), null), list: history.slice(0, 30) });
 let saveT = null;
 function save() {
@@ -63,7 +66,7 @@ async function botLoop() {
       if (msg && msg.text && msg.text.startsWith('/start')) {
         tgApi('sendMessage', {
           chat_id: msg.chat.id,
-          text: 'Ice Arena — ставь и забирай территорию на льду 🏒',
+          text: '\u2063',
           reply_markup: { inline_keyboard: [[{ text: 'Зайти в игру', web_app: { url: APP_URL || 'https://example.com' } }]] }
         }).catch(e => console.error('sendMessage error', e));
       }
@@ -98,8 +101,8 @@ function spot() {
 }
 
 function bet(u, amt) {
-  amt = r3(Number(amt));
-  if (!(amt >= 0.01)) return 'Минимальная ставка 0.01 ⭐';
+  amt = Number(amt);
+  if (!Number.isInteger(amt) || amt < 1) return 'Ставка — целое число от 1 ⭐ (1, 2, 3…)';
   if (amt > u.balance) return 'Недостаточно средств на балансе';
   if (round.status === 'running' || round.status === 'result') return 'Раунд уже идёт';
   if (round.status === 'countdown' && Date.now() > round.endsAt - CLOSE) return 'Приём ставок закрыт';
