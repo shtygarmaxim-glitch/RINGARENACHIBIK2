@@ -129,13 +129,17 @@ html,body{background:#0a0a0a;font-family:var(--ff-b)}
 .anomaly-badge.rolling .ab-icon{opacity:1;transform:scale(1)}
 .anomaly-badge.settled .ab-ball{display:none}
 .anomaly-badge.settled .ab-icon{opacity:1;transform:scale(1)}
-.adm-anomaly{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin:8px 0 4px}
+.adm-anomaly{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin:8px 0 4px}
 .adm-anomaly button{padding:9px 4px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.06);color:#c9c5b8;font:700 11px var(--ff-b);cursor:pointer}
 /* аномалия "Гонка": зоны едут вверх конвейером, пока шайба катится */
 .race-track{position:absolute;left:0;right:0;top:0;height:200%;animation:race-scroll 3.6s linear infinite;will-change:transform}
 .race-frame{position:absolute;left:0;right:0;top:0;height:50%}
 .race-frame:nth-child(2){top:50%}
 @keyframes race-scroll{from{transform:translateY(0)}to{transform:translateY(-50%)}}
+.ice-arena-shell.storm-active{animation:storm-shake .12s linear infinite}
+@keyframes storm-shake{0%{transform:translate(0,0)}20%{transform:translate(-2px,1px)}40%{transform:translate(2px,-1px)}60%{transform:translate(-1px,-2px)}80%{transform:translate(1px,2px)}100%{transform:translate(0,0)}}
+.ice-zone-map.storm-active .zone-item svg{animation:storm-flicker .3s ease-in-out infinite alternate}
+@keyframes storm-flicker{from{filter:brightness(1)}to{filter:brightness(1.4)}}
 </style></head><body><div class="ice-screen active" id="iceScreen">
   <div class="ice-topbar">
     <div class="hd-btns"><button class="hd-btn" id="histBtn" aria-label="История игр"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h1V3a1 1 0 0 1 1-1zm13 8H4v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9z"/></svg></button></div>
@@ -147,7 +151,7 @@ html,body{background:#0a0a0a;font-family:var(--ff-b)}
       <div class="hd-card"><small>Последняя игра</small><div class="hd-row" id="lastGame"><span class="hd-empty">Пока нет игр</span></div></div>
     </div>
     <div class="ice-game-card"><div class="ice-total"><span class="tot-l">Тотал <b id="icePool">0</b><span class="star">⭐</span></span><span class="tot-r" id="iceStatus">Подключение…</span></div>
-    <div class="ice-arena-shell" id="iceArenaShell"><div class="ice-arena" id="iceArena"><div class="ice-zone-map" id="iceZoneMap"></div><div class="ice-puck" id="icePuck"><span class="puck-ripple"></span><img class="puck-img" alt="" draggable="false" src="/puck.png"><span class="ice-arrow"><svg viewBox="0 0 14 20" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 19V3M2.2 7.8 7 3l4.8 4.8"/></svg></span></div><div id="anomalyBadge" class="anomaly-badge"><span class="ab-ball"></span><span class="ab-icon"></span></div><div class="ice-winner" id="iceWinner"></div></div></div>
+    <div class="ice-arena-shell" id="iceArenaShell"><div class="ice-arena" id="iceArena"><div class="ice-zone-map" id="iceZoneMap"></div><div class="ice-puck" id="icePuck"><span class="puck-ripple"></span><img class="puck-img" alt="" draggable="false" src="/puck.png"><span class="ice-arrow"><svg viewBox="0 0 14 20" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 19V3M2.2 7.8 7 3l4.8 4.8"/></svg></span></div><div id="anomalyBadge" class="anomaly-badge"><span class="ab-ball"></span><span class="ab-icon"></span></div><div class="ice-winner" id="iceWinner"></div></div></div></div>
     <div class="ice-controls"><div class="ice-stake-label">Ставка, ⭐ <strong id="stakeInfo"></strong></div>
       <div class="ice-stakes"><button data-a="min">Мин</button><button data-a="-5">−5</button><button data-a="-1">−1</button><button data-a="+1">+1</button><button data-a="+5">+5</button><button data-a="max">Макс</button></div>
       <div class="ice-bet-field" style="margin:10px 0 0"><input id="betAmt" type="number" min="1" step="1" value="1" inputmode="numeric"></div>
@@ -170,7 +174,7 @@ html,body{background:#0a0a0a;font-family:var(--ff-b)}
     <label class="ice-bet-field">Сумма, ⭐ (минус — списать)<input id="admAmt" type="number" step="0.01" value="1" inputmode="decimal"></label>
     <button class="ice-bet-confirm" id="admGive">Выдать / списать</button>
     <label class="ice-bet-field">Аномалии (форс на следующий раунд)</label>
-    <div class="adm-anomaly"><button data-an="slide">⚡ Скольжение</button><button data-an="race">🏁 Гонка</button><button data-an="">✖ Снять</button></div>
+    <div class="adm-anomaly"><button data-an="race">🏁 Гонка</button><button data-an="stop">🛑 Стоп</button><button data-an="storm">⚡ Шторм</button><button data-an="">✖ Снять</button></div>
     <div class="adm-list" id="adminList"></div></div></div>
   <div class="toast" id="toast"></div>
 </div>
