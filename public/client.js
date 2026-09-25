@@ -181,7 +181,7 @@
     ws.onclose = () => setTimeout(connect, 1500);
     ws.onmessage = e => {
       const m = JSON.parse(e.data);
-      if (m.t === 'me') { me = m.user; isAdmin = m.admin; $('bal').textContent = fmt(me.balance); $('adminBtn').style.visibility = isAdmin ? 'visible' : 'hidden'; ui(); }
+      if (m.t === 'me') { me = m.user; isAdmin = m.admin; $('bal').textContent = fmt(me.balance); ui(); }
       else if (m.t === 'state') {
         skew = m.now - Date.now(); st = m;
         if (st.status === 'waiting' || st.status === 'countdown') resetVisual();
@@ -196,8 +196,15 @@
   connect();
 
   // ---------- ставки ----------
-  $('iceJoinBtn').addEventListener('click', () => send({ t: 'bet', amount: Number($('betAmt').value) }));
-  document.querySelectorAll('.ice-stakes button').forEach(b => b.addEventListener('click', () => { $('betAmt').value = b.dataset.v; }));
+  $('iceJoinBtn').addEventListener('click', () => send({ t: 'bet', amount: Math.round(Number($('betAmt').value)) }));
+  document.querySelectorAll('.ice-stakes button').forEach(b => b.addEventListener('click', () => {
+    const cur = Math.round(Number($('betAmt').value)) || 1;
+    const max = me ? Math.max(1, Math.floor(me.balance)) : cur;
+    const act = b.dataset.a;
+    let v = act === 'min' ? 1 : act === 'max' ? max : cur + Number(act);
+    $('betAmt').value = Math.max(1, Math.min(max, v));
+  }));
+  $('betAmt').addEventListener('input', () => { $('betAmt').value = $('betAmt').value.replace(/[^0-9]/g, ''); });
 
   // ---------- история игр ----------
   let hData = { top: null, last: null, list: [] }, curGame = null;
@@ -278,7 +285,13 @@
     $('adminList').innerHTML = list.map(u => `<div class="adm-row" data-id="${u.id}"><span>${esc(u.name)}<small>${u.id}</small></span><b>${fmt(u.balance)}</b></div>`).join('') || '<p class="ice-hint">Пока никто не заходил</p>';
     document.querySelectorAll('.adm-row').forEach(r => r.addEventListener('click', () => { $('admId').value = r.dataset.id; $('admAmt').focus(); }));
   }
-  $('adminBtn').addEventListener('click', () => { $('adminModal').classList.add('show'); send({ t: 'admin_users' }); });
+  // ---------- админка (скрытая: 3 быстрых тапа по балансу, только для админа) ----------
+  let admTaps = 0, admTapT = null;
+  $('balancePill').addEventListener('click', () => {
+    if (!isAdmin) return;
+    admTaps++; clearTimeout(admTapT); admTapT = setTimeout(() => admTaps = 0, 900);
+    if (admTaps >= 3) { admTaps = 0; $('adminModal').classList.add('show'); send({ t: 'admin_users' }); }
+  });
   $('adminClose').addEventListener('click', () => $('adminModal').classList.remove('show'));
   $('adminModal').addEventListener('click', e => { if (e.target === $('adminModal')) $('adminModal').classList.remove('show'); });
   $('admGive').addEventListener('click', () => send({ t: 'admin_give', userId: $('admId').value, amount: Number($('admAmt').value) }));
